@@ -1,5 +1,6 @@
 import streamlit as st
 import requests
+import json
 from typing import Optional, Dict, Any, Tuple
 from config import Config
 
@@ -99,6 +100,27 @@ if run_search_btn:
             st.markdown("### 📦 الـ Chunks المسترجعة:")
             
             if result['chunks']:
+                # زر تحميل النتائج
+                download_data = {
+                    "contract_text": result['contract_text'],
+                    "total_chunks": result['total_chunks'],
+                    "top_k": result['top_k'],
+                    "chunks": result['chunks']
+                }
+                
+                json_str = json.dumps(download_data, ensure_ascii=False, indent=2)
+                
+                st.download_button(
+                    label="⬇️ تحميل النتائج (JSON)",
+                    data=json_str,
+                    file_name="file_search_results.json",
+                    mime="application/json",
+                    use_container_width=True,
+                    type="primary"
+                )
+                
+                st.markdown("---")
+                
                 for idx, chunk in enumerate(result['chunks'], 1):
                     with st.container():
                         st.markdown("#### Chunk {}".format(idx))
