@@ -116,7 +116,7 @@ class FileSearchService:
                 print("[INDEXING] Waiting for {} to be indexed...".format(file_path.name))
                 while not operation.done:
                     time.sleep(2)
-                    operation = self.client.operations.get(operation=operation.name)
+                    operation = self.client.operations.get(operation)
 
                 uploaded_count += 1
                 print("[SUCCESS] {} uploaded and indexed".format(file_path.name))
