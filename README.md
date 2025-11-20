@@ -276,3 +276,8 @@ Python-dotenv could not parse statement starting at line 13-37
 ---
 
 **Built with ❤️ using Gemini 2.5 Flash & File Search API**
+
+
+
+*الكتاب العربي*
+FILE_SEARCH_STORE_ID=fileSearchStores/aaoifi-reference-store-vwvmgtb64hqq
