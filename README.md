@@ -43,7 +43,7 @@
 # Gemini API Configuration
 GEMINI_API_KEY=AIzaSyDTcF7aQ8NAuJMcIpkdsKo37K7thi0ZhVE
 MODEL_NAME=gemini-2.5-flash
-FILE_SEARCH_STORE_ID=fileSearchStores/aaoifi-reference-store-eh6go6xtuavz
+FILE_SEARCH_STORE_ID=fileSearchStores/aaoifi-reference-store-vwvmgtb64hqq
 
 # File Search Configuration
 TOP_K_CHUNKS=20
