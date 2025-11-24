@@ -198,8 +198,9 @@ class FileSearchService:
                 
                 # طباعة النص المُولّد من Gemini
                 if hasattr(candidate, 'content') and candidate.content:
-                    if hasattr(candidate.content, 'parts') and candidate.content.parts:
-                        generated_text = candidate.content.parts[0].text if hasattr(candidate.content.parts[0], 'text') else 'N/A'
+                    if hasattr(candidate.content, 'parts') and candidate.content.parts and len(candidate.content.parts) > 0:
+                        first_part = candidate.content.parts[0]
+                        generated_text = first_part.text if hasattr(first_part, 'text') else 'N/A'
                         print("[DEBUG] Generated text preview: {}...".format(generated_text[:200]))
 
             # استخراج الـ chunks من الـ grounding metadata
@@ -225,13 +226,16 @@ class FileSearchService:
             top_k: الحد الأقصى لعدد الـ chunks
 
         Returns:
-            List[Dict]: قائمة بالـ chunks، كل chunk يحتوي على:
-                - uid: معرّف فريد
-                - chunk_text: النص الأصلي من PDF
-                - score: درجة الصلة
-                - uri: مصدر الملف
-                - title: عنوان الملف
-        """
+            {description}
+            كل chunk يحتوي على:
+            {fields}
+        """.format(
+            description=Config.CHUNK_SCHEMA["description"],
+            fields="\n            ".join([
+                f"- {key}: {value}" 
+                for key, value in Config.CHUNK_SCHEMA["fields"].items()
+            ])
+        )
 
         chunks = []
 
