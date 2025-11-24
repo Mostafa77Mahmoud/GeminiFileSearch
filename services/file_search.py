@@ -221,13 +221,41 @@ class FileSearchService:
             traceback.print_exc()
             return []
 
+    def _get_sensitive_keywords(self) -> List[str]:
+        """قائمة الكلمات المفتاحية الحساسة التي تحتاج بحث منفصل أعمق"""
+        return [
+            "الغرر", "الجهالة", "الربا", "فائدة التأخير", 
+            "التعويض غير المشروع", "الشرط الباطل", "الشرط الجائر",
+            "الظلم", "الإكراه", "الضرر", "الوعد الملزم"
+        ]
+
+    def _filter_sensitive_clauses(self, extracted_terms: List[Dict]) -> List[Dict]:
+        """
+        فصل البنود الحساسة من البنود العادية
+        البنود الحساسة هي التي تحتوي على كلمات مفتاحية حساسة من AAOIFI
+        """
+        sensitive_keywords = self._get_sensitive_keywords()
+        sensitive_clauses = []
+        
+        for term in extracted_terms:
+            issues = term.get("potential_issues", [])
+            # تحقق إذا كان أي من الكلمات المفتاحية موجود
+            if any(keyword in issues for keyword in sensitive_keywords):
+                sensitive_clauses.append(term)
+        
+        return sensitive_clauses
+
     def search_chunks(self, contract_text: str, top_k: Optional[int] = None) -> List[Dict]:
         """
-        البحث عن chunks ذات صلة بنص العقد
+        البحث الهجين (Hybrid) عن chunks ذات صلة بنص العقد
+        
+        يستخدم نهج مرحلتين:
+        1. بحث جماعي شامل لكل البنود (20 chunks)
+        2. بحث منفصل معمّق للبنود الحساسة فقط (5 chunks إضافية)
 
         Args:
             contract_text: نص العقد للبحث عنه
-            top_k: عدد الـ chunks المطلوبة (اختياري)
+            top_k: عدد الـ chunks المطلوبة للبحث الجماعي (اختياري)
 
         Returns:
             List[Dict]: {description}
@@ -248,7 +276,7 @@ class FileSearchService:
             top_k = Config.TOP_K_CHUNKS
 
         print("\n" + "="*60)
-        print("TWO-STEP FILE SEARCH PROCESS")
+        print("HYBRID FILE SEARCH PROCESS (Two-Step + Sensitive Clauses)")
         print("="*60)
 
         try:
@@ -257,25 +285,17 @@ class FileSearchService:
             
             if not extracted_terms:
                 print("[WARNING] No terms extracted, falling back to full contract search")
-                # Fallback: استخدام العقد كاملاً إذا فشل الاستخراج
-                extracted_clauses_text = contract_text[:2000]  # استخدام أول 2000 حرف
+                extracted_clauses_text = contract_text[:2000]
             else:
-                # تحويل البنود المستخرجة إلى نص منسق
                 extracted_clauses_text = json.dumps(extracted_terms, ensure_ascii=False, indent=2)
             
-            # ===== المرحلة الثانية: البحث في File Search باستخدام البنود =====
-            print("\n[STEP 2/2] Searching in File Search using extracted terms...")
-            print("[INFO] Extracted clauses length: {} characters".format(len(extracted_clauses_text)))
+            # ===== المرحلة الثانية: البحث الجماعي (20 chunks) =====
+            print("\n[PHASE 1/2] General Search for all extracted clauses...")
+            print("[INFO] Using top_k={} for comprehensive coverage".format(top_k))
             
-            # استخدام الـ prompt المحسّن مع البنود المستخرجة
             full_prompt = self.search_prompt_template.format(extracted_clauses=extracted_clauses_text)
 
-            print("[SEARCH] Querying Gemini File Search...")
-            print("[SEARCH] Using store: {}".format(self.store_id))
-            print("[SEARCH] Top K: {}".format(top_k))
-
-            # استدعاء Gemini مع File Search tool والـ store_id
-            # topK parameter في FileSearch يتحكم في عدد الـ chunks
+            print("[SEARCH] Querying Gemini File Search (Phase 1)...")
             response = self.client.models.generate_content(
                 model=self.model_name,
                 contents=full_prompt,
@@ -290,34 +310,105 @@ class FileSearchService:
                 )
             )
 
-            print("[DEBUG] Response received from Gemini")
-            print("[DEBUG] Response type: {}".format(type(response)))
-            
-            # طباعة diagnostic information
-            if hasattr(response, 'candidates') and response.candidates:
-                candidate = response.candidates[0]
-                print("[DEBUG] Candidate finish_reason: {}".format(getattr(candidate, 'finish_reason', 'N/A')))
-                print("[DEBUG] Has grounding_metadata: {}".format(hasattr(candidate, 'grounding_metadata')))
-                if hasattr(candidate, 'grounding_metadata'):
-                    gm = candidate.grounding_metadata
-                    print("[DEBUG] grounding_metadata is None: {}".format(gm is None))
-                    if gm:
-                        print("[DEBUG] Has grounding_chunks: {}".format(hasattr(gm, 'grounding_chunks')))
-                        if hasattr(gm, 'grounding_chunks'):
-                            print("[DEBUG] Number of grounding_chunks: {}".format(len(gm.grounding_chunks) if gm.grounding_chunks else 0))
-                
-                # طباعة النص المُولّد من Gemini
-                if hasattr(candidate, 'content') and candidate.content:
-                    if hasattr(candidate.content, 'parts') and candidate.content.parts and len(candidate.content.parts) > 0:
-                        first_part = candidate.content.parts[0]
-                        generated_text = (first_part.text if hasattr(first_part, 'text') else None) or 'N/A'
-                        print("[DEBUG] Generated text preview: {}...".format(generated_text[:200] if len(generated_text) > 200 else generated_text))
-
             # استخراج الـ chunks من الـ grounding metadata
-            chunks = self._extract_grounding_chunks(response, top_k)
+            general_chunks = self._extract_grounding_chunks(response, top_k)
+            print("[SUCCESS] Phase 1 retrieved {} chunks".format(len(general_chunks)))
+            
+            # ===== المرحلة الثالثة: البحث المعمّق للبنود الحساسة (5 chunks إضافية) =====
+            sensitive_chunks = []
+            
+            if extracted_terms:
+                sensitive_clauses = self._filter_sensitive_clauses(extracted_terms)
+                
+                if sensitive_clauses:
+                    print("\n[PHASE 2/2] Deep Search for {} sensitive clause(s)...".format(len(sensitive_clauses)))
+                    print("[INFO] Sensitive clauses: {}".format(
+                        ", ".join([c.get("term_id", "unknown") for c in sensitive_clauses[:3]])
+                    ))
+                    
+                    # بحث منفصل لكل بند حساس
+                    for sensitive_clause in sensitive_clauses:
+                        clause_id = sensitive_clause.get("term_id", "unknown")
+                        clause_text = sensitive_clause.get("term_text", "")
+                        issues = sensitive_clause.get("potential_issues", [])
+                        
+                        print("\n[DEEP SEARCH] Processing sensitive clause: {}".format(clause_id))
+                        print("[INFO] Issues: {}".format(", ".join(issues[:3])))
+                        
+                        # بناء prompt منفصل للبند الحساس
+                        sensitive_search_prompt = """قم بالبحث الدقيق والعميق في معايير AAOIFI عن المقاطع التي تتعلق مباشرة بالمشاكل الشرعية التالية:
 
-            print("[SUCCESS] Retrieved {} chunks\n".format(len(chunks)))
-            return chunks
+مشاكل شرعية:
+{issues}
+
+نص البند من العقد:
+{clause_text}
+
+ابحث عن:
+1. المعايير الشرعية الدقيقة (رقم المعيار وتفاصيله).
+2. النصوص التي تحتوي على كلمات حاسمة: "لا يجوز"، "محرم"، "يبطل"، "ضرر فعلي"، "غرر"، "ربا".
+3. أمثلة على حالات مشابهة أو مخالفة.
+4. القيود والشروط الدقيقة من AAOIFI.
+
+ركز على الدقة الشرعية العالية والاقتباسات الحرفية.""".format(
+                            issues="\n".join(issues),
+                            clause_text=clause_text
+                        )
+                        
+                        # استدعاء Gemini للبحث المعمّق (5 chunks فقط)
+                        sensitive_response = self.client.models.generate_content(
+                            model=self.model_name,
+                            contents=sensitive_search_prompt,
+                            config=types.GenerateContentConfig(
+                                tools=[types.Tool(
+                                    file_search=types.FileSearch(
+                                        file_search_store_names=[self.store_id],
+                                        top_k=5  # 5 chunks فقط لكل بند حساس
+                                    )
+                                )],
+                                response_modalities=["TEXT"]
+                            )
+                        )
+                        
+                        clause_chunks = self._extract_grounding_chunks(sensitive_response, 5)
+                        print("[SUCCESS] Deep search retrieved {} chunks for {}".format(
+                            len(clause_chunks), clause_id
+                        ))
+                        sensitive_chunks.extend(clause_chunks)
+                else:
+                    print("\n[PHASE 2/2] No sensitive clauses found, skipping deep search")
+            
+            # ===== دمج النتائج (إزالة التكرار) =====
+            print("\n[MERGE] Combining general and sensitive chunks...")
+            
+            # استخدام dict لإزالة التكرار بناءً على chunk_text
+            chunk_dict = {}
+            
+            # أضف البنود العامة أولاً
+            for chunk in general_chunks:
+                chunk_text = chunk.get("chunk_text", "")
+                if chunk_text and chunk_text not in chunk_dict:
+                    chunk_dict[chunk_text] = chunk
+            
+            # أضف البنود الحساسة (قد تكون بنود جديدة أكثر دقة)
+            for chunk in sensitive_chunks:
+                chunk_text = chunk.get("chunk_text", "")
+                if chunk_text and chunk_text not in chunk_dict:
+                    chunk_dict[chunk_text] = chunk
+            
+            # تحويل dict إلى list
+            all_chunks = list(chunk_dict.values())
+            
+            # إعادة ترقيم الـ chunks
+            for idx, chunk in enumerate(all_chunks):
+                chunk["uid"] = "chunk_{}".format(idx + 1)
+            
+            print("[SUCCESS] Total {} unique chunks (General: {}, Sensitive: {}, Merged)".format(
+                len(all_chunks), len(general_chunks), len(sensitive_chunks)
+            ))
+            print("="*60 + "\n")
+            
+            return all_chunks
 
         except Exception as e:
             print("[ERROR] Search failed: {}".format(e))
