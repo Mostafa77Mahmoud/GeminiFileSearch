@@ -200,8 +200,8 @@ class FileSearchService:
                 if hasattr(candidate, 'content') and candidate.content:
                     if hasattr(candidate.content, 'parts') and candidate.content.parts and len(candidate.content.parts) > 0:
                         first_part = candidate.content.parts[0]
-                        generated_text = first_part.text if hasattr(first_part, 'text') else 'N/A'
-                        print("[DEBUG] Generated text preview: {}...".format(generated_text[:200]))
+                        generated_text = (first_part.text if hasattr(first_part, 'text') else None) or 'N/A'
+                        print("[DEBUG] Generated text preview: {}...".format(generated_text[:200] if len(generated_text) > 200 else generated_text))
 
             # استخراج الـ chunks من الـ grounding metadata
             chunks = self._extract_grounding_chunks(response, top_k)
