@@ -38,6 +38,18 @@ class Config:
 يجب استخدام المستندات المرفقة في الإجابة."""
     )
     
+    # Chunk Schema Configuration (هيكل البيانات المُرجعة من File Search)
+    CHUNK_SCHEMA = {
+        "description": "قائمة بالـ chunks المسترجعة من File Search",
+        "fields": {
+            "uid": "معرّف فريد للـ chunk",
+            "chunk_text": "نص الـ chunk الأصلي من المستند",
+            "score": "درجة الصلة (0.0 - 1.0)",
+            "uri": "مصدر الملف (URI)",
+            "title": "عنوان الملف أو القسم"
+        }
+    }
+    
     # Flask Configuration
     FLASK_HOST = os.getenv("FLASK_HOST", "0.0.0.0")
     FLASK_PORT = int(os.getenv("FLASK_PORT", "5001"))

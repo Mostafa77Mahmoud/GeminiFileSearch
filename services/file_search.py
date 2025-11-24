@@ -136,12 +136,16 @@ class FileSearchService:
             top_k: عدد الـ chunks المطلوبة (اختياري)
 
         Returns:
-            List[Dict]: قائمة بالـ chunks المسترجعة، كل chunk يحتوي على:
-                - uid: معرّف فريد للـ chunk
-                - chunk_text: نص الـ chunk
-                - score: درجة الصلة
-                - uri: مصدر الـ chunk (إن وجد)
-        """
+            List[Dict]: {description}
+            كل chunk يحتوي على الحقول التالية:
+            {fields}
+        """.format(
+            description=Config.CHUNK_SCHEMA["description"],
+            fields="\n            ".join([
+                f"- {key}: {value}" 
+                for key, value in Config.CHUNK_SCHEMA["fields"].items()
+            ])
+        )
 
         if not self.store_id:
             raise ValueError("File Search Store not initialized. Run initialize_store() first.")
