@@ -18,7 +18,7 @@ class FileSearchService:
         self.model_name = Config.MODEL_NAME
         self.store_id: Optional[str] = Config.FILE_SEARCH_STORE_ID
         self.context_dir = Config.CONTEXT_DIR
-        self.search_prompt_template = Config.SEARCH_PROMPT
+        self.search_prompt_template = Config.FILE_SEARCH_PROMPT
 
         print("[INFO] FileSearchService initialized")
         print("[INFO] Model: {}".format(self.model_name))
@@ -153,23 +153,8 @@ class FileSearchService:
         print("[SEARCH] Contract text length: {} characters".format(len(contract_text)))
 
         try:
-            # بناء prompt محسّن لإجبار Gemini على استخدام File Search
-            # يجب أن يكون الـ prompt واضحاً جداً أننا نريد البحث في المستندات المرفقة
-            full_prompt = """يجب عليك البحث في المستندات المرجعية (معايير هيئة AAOIFI الشرعية) عن معلومات متعلقة بالنص التالي.
-
-استخدم File Search للبحث في المستندات المرفقة واستخرج جميع المقاطع (chunks) ذات الصلة.
-
-النص المطلوب تحليله:
-{}
-
-قم بالبحث في المستندات المرجعية عن:
-1. الأحكام والمعايير الشرعية المتعلقة بهذا النوع من العقود
-2. الشروط والضوابط الشرعية
-3. الحالات المشابهة أو الأمثلة
-4. الأحكام الخاصة بالمخالفات أو الجزاءات
-5. أي معلومات أخرى ذات صلة من معايير AAOIFI
-
-يجب استخدام المستندات المرفقة في الإجابة.""".format(contract_text)
+            # استخدام الـ prompt template من Config
+            full_prompt = self.search_prompt_template.format(contract_text=contract_text)
 
             print("[SEARCH] Querying Gemini File Search...")
             print("[SEARCH] Using store: {}".format(self.store_id))
