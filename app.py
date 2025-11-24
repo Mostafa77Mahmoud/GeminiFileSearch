@@ -54,9 +54,54 @@ def store_info():
     info = file_search_service.get_store_info()
     return jsonify(info)
 
+@app.route('/extract_terms', methods=['POST'])
+def extract_terms():
+    """Extract key terms endpoint - extracts important clauses from contract"""
+    
+    if not file_search_service:
+        return jsonify({
+            "error": "File Search Service not initialized"
+        }), 500
+    
+    try:
+        data = request.get_json()
+        
+        if not data or 'contract_text' not in data:
+            return jsonify({
+                "error": "Missing 'contract_text' in request body"
+            }), 400
+        
+        contract_text = data['contract_text']
+        
+        if not contract_text.strip():
+            return jsonify({
+                "error": "Contract text cannot be empty"
+            }), 400
+        
+        print(f"[INFO] Processing term extraction request")
+        extracted_terms = file_search_service.extract_key_terms(contract_text)
+        
+        response = {
+            "contract_text": contract_text,
+            "extracted_terms": extracted_terms,
+            "total_terms": len(extracted_terms)
+        }
+        
+        return jsonify(response)
+        
+    except Exception as e:
+        print(f"[ERROR] Term extraction failed: {e}")
+        return jsonify({
+            "error": str(e)
+        }), 500
+
 @app.route('/file_search', methods=['POST'])
 def file_search():
-    """File Search endpoint - retrieves chunks for a given contract text"""
+    """
+    File Search endpoint - two-step process:
+    1. Extracts key terms from contract
+    2. Searches for relevant chunks using extracted terms
+    """
     
     if not file_search_service:
         return jsonify({
@@ -79,14 +124,17 @@ def file_search():
                 "error": "Contract text cannot be empty"
             }), 400
         
-        print(f"[INFO] Processing file search request with top_k={top_k}")
+        print(f"[INFO] Processing two-step file search request with top_k={top_k}")
+        
+        # ملاحظة: search_chunks الآن يستدعي extract_key_terms داخلياً
         chunks = file_search_service.search_chunks(contract_text, top_k)
         
         response = {
             "contract_text": contract_text,
             "chunks": chunks,
             "total_chunks": len(chunks),
-            "top_k": top_k
+            "top_k": top_k,
+            "message": "Two-step process: extracted key terms then searched File Search"
         }
         
         return jsonify(response)
@@ -107,7 +155,8 @@ if __name__ == '__main__':
         print("API READY - Endpoints Available:")
         print(f"  - GET  /health")
         print(f"  - GET  /store-info")
-        print(f"  - POST /file_search")
+        print(f"  - POST /extract_terms  (Step 1: Extract key terms)")
+        print(f"  - POST /file_search    (Two-step: Extract + Search)")
         print("=" * 60 + "\n")
         
         app.run(

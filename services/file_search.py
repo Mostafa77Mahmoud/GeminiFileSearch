@@ -1,4 +1,6 @@
 import time
+import json
+import re
 from google import genai
 from google.genai import types
 from pathlib import Path
@@ -10,6 +12,10 @@ class FileSearchService:
     """
     خدمة البحث في الملفات باستخدام Google Gemini File Search API
     تركز على استرجاع chunks من مستندات AAOIFI المرجعية
+    
+    يستخدم نهج two-step:
+    1. استخراج البنود المهمة من العقد
+    2. البحث في File Search باستخدام البنود المستخرجة
     """
 
     def __init__(self):
@@ -18,6 +24,7 @@ class FileSearchService:
         self.model_name = Config.MODEL_NAME
         self.store_id: Optional[str] = Config.FILE_SEARCH_STORE_ID
         self.context_dir = Config.CONTEXT_DIR
+        self.extract_prompt_template = Config.EXTRACT_KEY_TERMS_PROMPT
         self.search_prompt_template = Config.FILE_SEARCH_PROMPT
 
         print("[INFO] FileSearchService initialized")
@@ -127,6 +134,93 @@ class FileSearchService:
         print("\n[SUMMARY] Successfully uploaded {}/{} files".format(uploaded_count, len(files)))
         print("="*60 + "\n")
 
+    def extract_key_terms(self, contract_text: str) -> List[Dict]:
+        """
+        المرحلة الأولى: استخراج البنود المهمة من العقد
+        
+        يستخدم Gemini لتحليل العقد واستخراج 5-15 بند مهم فقط
+        مع كلمات مفتاحية شرعية لتحسين البحث اللاحق
+        
+        Args:
+            contract_text: نص العقد الكامل
+            
+        Returns:
+            List[Dict]: قائمة البنود المستخرجة، كل بند يحتوي على:
+                - term_id: معرف فريد
+                - term_text: نص البند
+                - potential_issues: كلمات مفتاحية شرعية
+                - relevance_reason: سبب الأهمية
+        """
+        
+        print("\n[STEP 1/2] Extracting key terms from contract...")
+        print("[INFO] Contract length: {} characters".format(len(contract_text)))
+        
+        try:
+            # تطبيق prompt الاستخراج
+            extraction_prompt = self.extract_prompt_template.format(contract_text=contract_text)
+            
+            print("[INFO] Calling Gemini for term extraction...")
+            response = self.client.models.generate_content(
+                model=self.model_name,
+                contents=extraction_prompt,
+                config=types.GenerateContentConfig(
+                    response_modalities=["TEXT"]
+                )
+            )
+            
+            # استخراج النص من الاستجابة
+            if not hasattr(response, 'candidates') or not response.candidates:
+                print("[ERROR] No candidates in extraction response")
+                return []
+            
+            candidate = response.candidates[0]
+            if not hasattr(candidate, 'content') or not candidate.content:
+                print("[ERROR] No content in extraction response")
+                return []
+            
+            if not hasattr(candidate.content, 'parts') or not candidate.content.parts:
+                print("[ERROR] No parts in extraction response")
+                return []
+            
+            extracted_text = candidate.content.parts[0].text if hasattr(candidate.content.parts[0], 'text') else None
+            
+            if not extracted_text:
+                print("[ERROR] No text in extraction response")
+                return []
+            
+            print("[DEBUG] Extraction response length: {} characters".format(len(extracted_text)))
+            
+            # استخراج JSON من الاستجابة (قد يكون محاطاً بنص إضافي)
+            # البحث عن أول [ وآخر ]
+            json_match = re.search(r'\[.*\]', extracted_text, re.DOTALL)
+            if json_match:
+                json_str = json_match.group(0)
+                extracted_terms = json.loads(json_str)
+                print("[SUCCESS] Extracted {} key terms".format(len(extracted_terms)))
+                
+                # طباعة معاينة البنود المستخرجة
+                for i, term in enumerate(extracted_terms[:3]):
+                    print("[PREVIEW] Term {}: {} - Issues: {}".format(
+                        i+1, 
+                        term.get('term_id', 'N/A'),
+                        ', '.join(term.get('potential_issues', []))
+                    ))
+                
+                return extracted_terms
+            else:
+                print("[ERROR] Could not find JSON array in response")
+                print("[DEBUG] Response preview: {}...".format(extracted_text[:500]))
+                return []
+                
+        except json.JSONDecodeError as e:
+            print("[ERROR] Failed to parse JSON from extraction: {}".format(e))
+            return []
+        except Exception as e:
+            print("[ERROR] Term extraction failed: {}".format(e))
+            import traceback
+            traceback.print_exc()
+            return []
+
     def search_chunks(self, contract_text: str, top_k: Optional[int] = None) -> List[Dict]:
         """
         البحث عن chunks ذات صلة بنص العقد
@@ -153,12 +247,28 @@ class FileSearchService:
         if top_k is None:
             top_k = Config.TOP_K_CHUNKS
 
-        print("\n[SEARCH] Starting search (top_k={})...".format(top_k))
-        print("[SEARCH] Contract text length: {} characters".format(len(contract_text)))
+        print("\n" + "="*60)
+        print("TWO-STEP FILE SEARCH PROCESS")
+        print("="*60)
 
         try:
-            # استخدام الـ prompt template من Config
-            full_prompt = self.search_prompt_template.format(contract_text=contract_text)
+            # ===== المرحلة الأولى: استخراج البنود المهمة =====
+            extracted_terms = self.extract_key_terms(contract_text)
+            
+            if not extracted_terms:
+                print("[WARNING] No terms extracted, falling back to full contract search")
+                # Fallback: استخدام العقد كاملاً إذا فشل الاستخراج
+                extracted_clauses_text = contract_text[:2000]  # استخدام أول 2000 حرف
+            else:
+                # تحويل البنود المستخرجة إلى نص منسق
+                extracted_clauses_text = json.dumps(extracted_terms, ensure_ascii=False, indent=2)
+            
+            # ===== المرحلة الثانية: البحث في File Search باستخدام البنود =====
+            print("\n[STEP 2/2] Searching in File Search using extracted terms...")
+            print("[INFO] Extracted clauses length: {} characters".format(len(extracted_clauses_text)))
+            
+            # استخدام الـ prompt المحسّن مع البنود المستخرجة
+            full_prompt = self.search_prompt_template.format(extracted_clauses=extracted_clauses_text)
 
             print("[SEARCH] Querying Gemini File Search...")
             print("[SEARCH] Using store: {}".format(self.store_id))
