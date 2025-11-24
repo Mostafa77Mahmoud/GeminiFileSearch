@@ -15,11 +15,11 @@ class Config:
     FILE_SEARCH_STORE_ID = os.getenv("FILE_SEARCH_STORE_ID", "")
     CONTEXT_DIR = "context"
 
-    # Search Configuration - Hybrid Approach
-    # البحث الجماعي: 20 chunks للتغطية الشاملة
-    # البحث المعمّق: 5 chunks لكل بند حساس
-    # النتيجة: 25-35+ chunks بدون تكرار (أدقّ وأشمل)
-    TOP_K_CHUNKS = int(os.getenv("TOP_K_CHUNKS", "20"))
+    # Search Configuration - Hybrid Approach (محسّن للسرعة)
+    # البحث الجماعي: 10 chunks للتغطية الشاملة
+    # البحث المعمّق: 2 chunks لكل بند حساس (تم تقليلها من 5 لتسريع العملية)
+    # النتيجة: 12-20+ chunks بدون تكرار (أدقّ وأسرع)
+    TOP_K_CHUNKS = int(os.getenv("TOP_K_CHUNKS", "10"))
 
     # المرحلة الأولى: Prompt لاستخراج البنود المهمة من العقد
     # ملاحظة: Keywords باللغة العربية لتطابق embeddings AAOIFI (المستند عربي)

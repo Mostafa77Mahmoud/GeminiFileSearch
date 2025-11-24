@@ -126,11 +126,12 @@ def file_search():
         
         print(f"[INFO] Processing two-step file search request with top_k={top_k}")
         
-        # ملاحظة: search_chunks الآن يستدعي extract_key_terms داخلياً
-        chunks = file_search_service.search_chunks(contract_text, top_k)
+        # ملاحظة: search_chunks الآن يرجع (chunks, extracted_terms)
+        chunks, extracted_terms = file_search_service.search_chunks(contract_text, top_k)
         
         response = {
             "contract_text": contract_text,
+            "extracted_terms": extracted_terms,
             "chunks": chunks,
             "total_chunks": len(chunks),
             "top_k": top_k,

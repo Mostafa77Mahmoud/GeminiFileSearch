@@ -4,7 +4,7 @@ import re
 from google import genai
 from google.genai import types
 from pathlib import Path
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 from config import Config
 
 
@@ -251,13 +251,16 @@ class FileSearchService:
         
         return sensitive_clauses
 
-    def search_chunks(self, contract_text: str, top_k: Optional[int] = None) -> List[Dict]:
+    def search_chunks(self, contract_text: str, top_k: Optional[int] = None) -> Tuple[List[Dict], List[Dict]]:
         """
         البحث الهجين (Hybrid) عن chunks ذات صلة بنص العقد
         
         يستخدم نهج مرحلتين:
-        1. بحث جماعي شامل لكل البنود (20 chunks)
-        2. بحث منفصل معمّق للبنود الحساسة فقط (5 chunks إضافية)
+        1. بحث جماعي شامل لكل البنود (10 chunks)
+        2. بحث منفصل معمّق للبنود الحساسة فقط (2 chunks إضافية)
+        
+        Returns:
+            Tuple[List[Dict], List[Dict]]: (chunks, extracted_terms)
 
         Args:
             contract_text: نص العقد للبحث عنه
@@ -380,7 +383,7 @@ class FileSearchService:
                             clause_text=clause_text
                         )
                         
-                        # استدعاء Gemini للبحث المعمّق (5 chunks فقط) مع retry logic
+                        # استدعاء Gemini للبحث المعمّق (2 chunks فقط) مع retry logic
                         max_retries_sensitive = 3
                         retry_count_sensitive = 0
                         sensitive_response = None
@@ -394,7 +397,7 @@ class FileSearchService:
                                         tools=[types.Tool(
                                             file_search=types.FileSearch(
                                                 file_search_store_names=[self.store_id],
-                                                top_k=5  # 5 chunks فقط لكل بند حساس
+                                                top_k=2  # 2 chunks فقط لكل بند حساس (تم تقليله من 5)
                                             )
                                         )],
                                         response_modalities=["TEXT"]
@@ -416,7 +419,7 @@ class FileSearchService:
                                     raise
                         
                         if sensitive_response:
-                            clause_chunks = self._extract_grounding_chunks(sensitive_response, 5)
+                            clause_chunks = self._extract_grounding_chunks(sensitive_response, 2)
                         else:
                             clause_chunks = []
                         print("[SUCCESS] Deep search retrieved {} chunks for {}".format(
@@ -456,7 +459,8 @@ class FileSearchService:
             ))
             print("="*60 + "\n")
             
-            return all_chunks
+            # إرجاع chunks و extracted_terms
+            return all_chunks, extracted_terms
 
         except Exception as e:
             print("[ERROR] Search failed: {}".format(e))
