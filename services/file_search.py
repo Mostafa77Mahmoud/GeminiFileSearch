@@ -157,7 +157,13 @@ class FileSearchService:
         
         try:
             # تطبيق prompt الاستخراج
-            extraction_prompt = self.extract_prompt_template.format(contract_text=contract_text)
+            try:
+                extraction_prompt = self.extract_prompt_template.format(contract_text=contract_text)
+            except KeyError as e:
+                print("[ERROR] Prompt formatting error (likely curly braces in template): {}".format(e))
+                print("[INFO] Retrying with escaped prompt...")
+                # Fallback: استخدام العقد مباشرة بدون الـ prompt المعقد
+                extraction_prompt = "استخرج البنود المهمة من هذا العقد: " + contract_text[:1000]
             
             print("[INFO] Calling Gemini for term extraction...")
             response = self.client.models.generate_content(
@@ -296,19 +302,38 @@ class FileSearchService:
             full_prompt = self.search_prompt_template.format(extracted_clauses=extracted_clauses_text)
 
             print("[SEARCH] Querying Gemini File Search (Phase 1)...")
-            response = self.client.models.generate_content(
-                model=self.model_name,
-                contents=full_prompt,
-                config=types.GenerateContentConfig(
-                    tools=[types.Tool(
-                        file_search=types.FileSearch(
-                            file_search_store_names=[self.store_id],
-                            top_k=top_k
+            
+            # Retry logic for 503 errors
+            max_retries = 3
+            retry_count = 0
+            response = None
+            
+            while retry_count < max_retries:
+                try:
+                    response = self.client.models.generate_content(
+                        model=self.model_name,
+                        contents=full_prompt,
+                        config=types.GenerateContentConfig(
+                            tools=[types.Tool(
+                                file_search=types.FileSearch(
+                                    file_search_store_names=[self.store_id],
+                                    top_k=top_k
+                                )
+                            )],
+                            response_modalities=["TEXT"]
                         )
-                    )],
-                    response_modalities=["TEXT"]
-                )
-            )
+                    )
+                    break  # Success - exit retry loop
+                except Exception as e:
+                    retry_count += 1
+                    if "503" in str(e) or "UNAVAILABLE" in str(e):
+                        print("[WARNING] Got 503 error, retrying... (attempt {}/{})".format(retry_count, max_retries))
+                        if retry_count < max_retries:
+                            time.sleep(2 ** retry_count)  # Exponential backoff
+                        else:
+                            raise
+                    else:
+                        raise
 
             # استخراج الـ chunks من الـ grounding metadata
             general_chunks = self._extract_grounding_chunks(response, top_k)
@@ -355,22 +380,45 @@ class FileSearchService:
                             clause_text=clause_text
                         )
                         
-                        # استدعاء Gemini للبحث المعمّق (5 chunks فقط)
-                        sensitive_response = self.client.models.generate_content(
-                            model=self.model_name,
-                            contents=sensitive_search_prompt,
-                            config=types.GenerateContentConfig(
-                                tools=[types.Tool(
-                                    file_search=types.FileSearch(
-                                        file_search_store_names=[self.store_id],
-                                        top_k=5  # 5 chunks فقط لكل بند حساس
-                                    )
-                                )],
-                                response_modalities=["TEXT"]
-                            )
-                        )
+                        # استدعاء Gemini للبحث المعمّق (5 chunks فقط) مع retry logic
+                        max_retries_sensitive = 3
+                        retry_count_sensitive = 0
+                        sensitive_response = None
                         
-                        clause_chunks = self._extract_grounding_chunks(sensitive_response, 5)
+                        while retry_count_sensitive < max_retries_sensitive:
+                            try:
+                                sensitive_response = self.client.models.generate_content(
+                                    model=self.model_name,
+                                    contents=sensitive_search_prompt,
+                                    config=types.GenerateContentConfig(
+                                        tools=[types.Tool(
+                                            file_search=types.FileSearch(
+                                                file_search_store_names=[self.store_id],
+                                                top_k=5  # 5 chunks فقط لكل بند حساس
+                                            )
+                                        )],
+                                        response_modalities=["TEXT"]
+                                    )
+                                )
+                                break  # Success - exit retry loop
+                            except Exception as e:
+                                retry_count_sensitive += 1
+                                if "503" in str(e) or "UNAVAILABLE" in str(e):
+                                    print("[WARNING] Got 503 error for sensitive search, retrying... (attempt {}/{})".format(
+                                        retry_count_sensitive, max_retries_sensitive))
+                                    if retry_count_sensitive < max_retries_sensitive:
+                                        time.sleep(2 ** retry_count_sensitive)  # Exponential backoff
+                                    else:
+                                        print("[ERROR] Sensitive search failed after retries, skipping this clause")
+                                        sensitive_response = None
+                                        break
+                                else:
+                                    raise
+                        
+                        if sensitive_response:
+                            clause_chunks = self._extract_grounding_chunks(sensitive_response, 5)
+                        else:
+                            clause_chunks = []
                         print("[SUCCESS] Deep search retrieved {} chunks for {}".format(
                             len(clause_chunks), clause_id
                         ))
